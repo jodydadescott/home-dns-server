@@ -1,0 +1,37 @@
+notes: PTR records will automatically be created
+unifiConfig:
+  config:
+    username: homeauto
+    password: rWERiIXyOEZBMsoO2DU
+    hostname: https://10.0.1.1
+  enabled: true
+listen:
+  port: 53
+  proto: udp
+static:
+  enabled: true
+  domains:
+  - dnsDomain: home
+    aRecords:
+    - hostname: a_record_1
+      ip: 192.168.1.1
+    - hostname: a_record_2
+      ip: 192.168.1.2
+    cnameRecords:
+    - aliasHostname: cname_record_1
+      targetHostname: a_record_1
+      targetDomain: home
+    - aliasHostname: cname_record_2
+      targetHostname: a_record_2
+      targetDomain: home
+nameservers:
+- ip: 8.8.8.8
+  port: 53
+  proto: udp
+- ip: 4.4.4.4
+  port: 53
+  proto: tcp
+- ip: 1.1.1.1
+  port: 4053
+  proto: tcp
+
