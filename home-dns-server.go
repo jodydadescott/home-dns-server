@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jodydadescott/unifi-dns-server/cmd"
+	"github.com/jodydadescott/home-dns-server/cmd"
 )
 
 func main() {

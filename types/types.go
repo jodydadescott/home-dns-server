@@ -3,9 +3,10 @@ package types
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/jinzhu/copier"
-	"github.com/jodydadescott/unifi-go-sdk/unifi"
+	"github.com/jodydadescott/unifi-go-sdk"
 )
 
 type ProtoType string
@@ -171,8 +172,9 @@ func (t *Config) AddNameserver(r *NetPort) *Config {
 
 type UnifiConfig struct {
 	unifi.Config
-	Enabled bool   `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Domain  string `json:"domain,omitempty" yaml:"domain,omitempty"`
+	Enabled    bool     `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Domain     string   `json:"domain,omitempty" yaml:"domain,omitempty"`
+	IgnoreMacs []string `json:"ignoreMacs,omitempty" yaml:"ignoreMacs,omitempty"`
 }
 
 // Clone return copy
@@ -180,6 +182,24 @@ func (t *UnifiConfig) Clone() *UnifiConfig {
 	c := &UnifiConfig{}
 	copier.Copy(&c, &t)
 	return c
+}
+
+func (t *UnifiConfig) AddIgnoreMac(mac string) *UnifiConfig {
+	t.IgnoreMacs = append(t.IgnoreMacs, mac)
+	return t
+}
+
+func (t *UnifiConfig) IgnoreMac(mac string) bool {
+
+	mac = strings.ToLower(mac)
+
+	for _, m := range t.IgnoreMacs {
+		if mac == strings.ToLower(m) {
+			return true
+		}
+	}
+
+	return false
 }
 
 type StaticConfig struct {

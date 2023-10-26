@@ -1,5 +1,5 @@
 BUILD_NUMBER := latest
-PROJECT_NAME := unifi-dns-server
+PROJECT_NAME := home-dns-server
 DOCKER_REGISTRY := jodydadescott
 DOCKER_IMAGE_NAME?=$(PROJECT_NAME)
 DOCKER_IMAGE_TAG?=$(BUILD_NUMBER)
@@ -9,7 +9,7 @@ default:
 
 linux-amd-64:
 	mkdir -p build/linux-amd-64
-	env GOOS=linux GOARCH=arm go build -o build/linux-amd-64/unifi-dns-server unifi-dns-server.go
+	env GOOS=linux GOARCH=arm go build -o build/linux-amd-64/home-dns-server home-dns-server.go
 
 container-amd-64:
 	$(MAKE) linux-amd-64

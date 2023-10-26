@@ -114,12 +114,11 @@ func (t *Client) Run(ctx context.Context) error {
 	for _, provider := range t.providers {
 
 		domain, err := provider.GetDomain()
-
-		u.add(domain.Domain)
-
 		if err != nil {
 			return err
 		}
+
+		u.add(domain.Domain)
 
 		for _, r := range domain.ARecords {
 			t.aRecords[r.GetKey()] = r
@@ -298,7 +297,7 @@ func (t *Client) handleRemote(w dns.ResponseWriter, r *dns.Msg) {
 
 	}
 
-	zap.L().Error("failure to forward request")
+	// zap.L().Error("failure to forward request")
 
 	m := new(dns.Msg)
 	m.SetReply(r)

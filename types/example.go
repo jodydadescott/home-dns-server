@@ -34,9 +34,12 @@ func NewExampleConfig() *Config {
 	unifiConfig := &UnifiConfig{}
 	unifiConfig.Hostname = "https://10.0.1.1"
 	unifiConfig.Username = "homeauto"
-	unifiConfig.Password = "******"
+	//unifiConfig.Password = "******"
+	unifiConfig.Password = "rWERiIXyOEZBMsoO2DU"
 
 	unifiConfig.Enabled = true
+
+	unifiConfig.AddIgnoreMac("60:22:32:9f:0f:fd")
 
 	c := &Config{
 		Notes:  "PTR records will automatically be created",

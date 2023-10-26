@@ -22,7 +22,8 @@ import (
 )
 
 const (
-	BinaryName = "unifi-dns-server"
+	BinaryName  = "unifi-dns-server"
+	CodeVersion = "1.0.0"
 )
 
 type Config = types.Config
@@ -63,6 +64,14 @@ var (
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o, _ := yaml.Marshal(types.NewExampleConfig())
 			fmt.Println(string(o))
+			return nil
+		},
+	}
+
+	versionCmd = &cobra.Command{
+		Use: "version",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println(CodeVersion)
 			return nil
 		},
 	}
@@ -168,5 +177,5 @@ func init() {
 	runCmd.PersistentFlags().StringVarP(&configFileArg, "config", "c", "", "config file")
 	runCmd.PersistentFlags().BoolVarP(&debugEnabledArg, "debug", "d", false, "debug to STDERR")
 	generateConfigCmd.AddCommand(generateJsonConfigCmd, generatePrettyJsonConfigCmd, generateYamlConfigCmd)
-	rootCmd.AddCommand(runCmd, generateConfigCmd)
+	rootCmd.AddCommand(versionCmd, runCmd, generateConfigCmd)
 }
