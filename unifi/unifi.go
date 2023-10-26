@@ -13,7 +13,7 @@ import (
 type Config = types.UnifiConfig
 type ARecord = types.ARecord
 type PTRrecord = types.PTRrecord
-type InternalUseDomain = types.InternalUseDomain
+type Domain = types.Domain
 
 type Client struct {
 	unifiClient *unifi.Client
@@ -58,7 +58,7 @@ func New(config *Config) *Client {
 	}
 }
 
-func (t *Client) GetDomain() (*InternalUseDomain, error) {
+func (t *Client) GetDomain() (*Domain, error) {
 
 	clients, err := t.unifiClient.GetClients()
 	if err != nil {
@@ -70,7 +70,7 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 		return nil, err
 	}
 
-	domain := &InternalUseDomain{
+	domain := &Domain{
 		Domain: t.domain,
 	}
 
@@ -105,7 +105,7 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 			SRC:      source + ":unifi-client",
 		}
 
-		domain.AddARecord(a)
+		domain.AddARecords(a)
 
 		p := &PTRrecord{
 			ARPA:     arpa,
@@ -114,7 +114,7 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 			SRC:      source + ":unifi-client",
 		}
 
-		domain.AddPtrRecord(p)
+		domain.AddPtrRecords(p)
 
 		zap.L().Debug(fmt.Sprintf("Added %s %s A %s and %s PTR %s", a.SRC, a.GetKey(), a.GetValue(), p.GetKey(), p.GetValue()))
 	}
@@ -154,7 +154,7 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 			SRC:      source + ":unifi-interface",
 		}
 
-		domain.AddARecord(a)
+		domain.AddARecords(a)
 
 		p := &PTRrecord{
 			ARPA:     arpa,
@@ -163,7 +163,7 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 			SRC:      source + ":unifi-interface",
 		}
 
-		domain.AddPtrRecord(p)
+		domain.AddPtrRecords(p)
 
 		zap.L().Debug(fmt.Sprintf("Added %s %s A %s and %s PTR %s", a.SRC, a.GetKey(), a.GetValue(), p.GetKey(), p.GetValue()))
 	}
@@ -203,7 +203,7 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 			SRC:      source + ":unifi-device",
 		}
 
-		domain.AddARecord(a)
+		domain.AddARecords(a)
 
 		p := &PTRrecord{
 			ARPA:     arpa,
@@ -212,7 +212,7 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 			SRC:      source + ":unifi-device",
 		}
 
-		domain.AddPtrRecord(p)
+		domain.AddPtrRecords(p)
 
 		zap.L().Debug(fmt.Sprintf("Added %s %s A %s and %s PTR %s", a.SRC, a.GetKey(), a.GetValue(), p.GetKey(), p.GetValue()))
 

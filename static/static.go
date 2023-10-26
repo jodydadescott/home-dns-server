@@ -11,14 +11,14 @@ import (
 type Config = types.StaticConfig
 type ARecord = types.ARecord
 type PTRrecord = types.PTRrecord
-type InternalUseDomain = types.InternalUseDomain
+type Domain = types.Domain
 
 const (
-	source = "static"
+	source = "config"
 )
 
 type Client struct {
-	domain *InternalUseDomain
+	domain *Domain
 }
 
 func New(config *Config) []*Client {
@@ -27,33 +27,31 @@ func New(config *Config) []*Client {
 		panic("config is required")
 	}
 
+	config = config.Clone()
+
 	var clients []*Client
 
 	for _, domain := range config.Domains {
 
-		domainName := domain.Domain
-		if domainName == "" {
-			domainName = types.DefaultDomain
+		if domain.Domain == "" {
+			domain.Domain = types.DefaultDomain
+
 		}
 
-		clients = append(clients, &Client{
-			domain: &InternalUseDomain{
-				Domain:       domainName,
-				ARecords:     domain.ARecords,
-				CnameRecords: domain.CnameRecords,
-			},
-		})
+		clients = append(clients, &Client{domain: domain})
 	}
 
 	return clients
 }
 
-func (t *Client) GetDomain() (*InternalUseDomain, error) {
+func (t *Client) GetDomain() (*Domain, error) {
 
 	domainName := t.domain.Domain
 	if domainName == "" {
 		domainName = types.DefaultDomain
 	}
+
+	ptrRecordsMap := make(map[string]*PTRrecord)
 
 	for _, a := range t.domain.ARecords {
 		if a.Hostname == "" {
@@ -68,23 +66,23 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 			a.Domain = t.domain.Domain
 		}
 
-		a.SRC = source
-
 		arpa, err := util.GetARPA(a.IP)
 		if err != nil {
 			return nil, err
 		}
 
+		a.SRC = source + ":static"
+
 		p := &PTRrecord{
 			ARPA:     arpa,
 			Hostname: a.Hostname,
 			Domain:   a.Domain,
-			SRC:      "static",
+			SRC:      source + ":dynamic",
 		}
 
-		p.SRC = source
+		ptrRecordsMap[p.GetKey()] = p
 
-		t.domain.AddPtrRecord(p)
+		// t.domain.AddPtrRecord(p)
 
 		zap.L().Debug(fmt.Sprintf("Added %s %s A %s and %s PTR %s", a.SRC, a.GetKey(), a.GetValue(), p.GetKey(), p.GetValue()))
 
@@ -108,11 +106,38 @@ func (t *Client) GetDomain() (*InternalUseDomain, error) {
 			r.TargetDomain = t.domain.Domain
 		}
 
-		r.SRC = source
+		r.SRC = source + ":static"
 
 		zap.L().Debug(fmt.Sprintf("Added %s %s CNAME %s", r.SRC, r.GetKey(), r.GetValue()))
 
 	}
 
+	for _, p := range t.domain.PtrRecords {
+		existing := ptrRecordsMap[p.GetKey()]
+		if existing == nil {
+
+			arpa, err := util.GetARPA(p.ARPA)
+			if err != nil {
+				return nil, err
+			}
+
+			p.ARPA = arpa
+			p.SRC = source + ":static"
+			ptrRecordsMap[p.GetKey()] = p
+
+			zap.L().Debug(fmt.Sprintf("Added %s %s PTR %s", p.SRC, p.GetKey(), p.GetValue()))
+		} else {
+			p.SRC = source + ":static-and-dynamic"
+			zap.L().Debug(fmt.Sprintf("PTR %s already existed with %s; source upted to %s", p.GetKey(), p.GetValue(), p.SRC))
+		}
+	}
+
+	var ptrRecords []*PTRrecord
+
+	for _, v := range ptrRecordsMap {
+		ptrRecords = append(ptrRecords, v)
+	}
+
+	t.domain.PtrRecords = ptrRecords
 	return t.domain, nil
 }

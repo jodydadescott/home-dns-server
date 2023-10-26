@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/jinzhu/copier"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
 
@@ -19,7 +20,7 @@ const (
 
 type NetPort = types.NetPort
 type ProtoType = types.ProtoType
-type InternalUseDomain = types.InternalUseDomain
+type Domain = types.Domain
 type ARecord = types.ARecord
 type PTRrecord = types.PTRrecord
 type CNameRecord = types.CNameRecord
@@ -27,8 +28,15 @@ type CNameRecord = types.CNameRecord
 type Config struct {
 	Providers   []Provider
 	Debug       bool
-	Listen      *NetPort
+	Listeners   []*NetPort
 	Nameservers []*NetPort
+}
+
+// Clone return copy
+func (t *Config) Clone() *Config {
+	c := &Config{}
+	copier.Copy(&c, &t)
+	return c
 }
 
 func (t *Config) AddProvider(provider Provider) {
@@ -37,7 +45,7 @@ func (t *Config) AddProvider(provider Provider) {
 
 type Client struct {
 	debug        bool
-	listen       *NetPort
+	listeners    []*NetPort
 	domains      []string
 	udpDnsClient *dns.Client
 	tcpDnsClient *dns.Client
@@ -49,7 +57,7 @@ type Client struct {
 }
 
 type Provider interface {
-	GetDomain() (*InternalUseDomain, error)
+	GetDomain() (*Domain, error)
 }
 
 func New(config *Config) *Client {
@@ -58,22 +66,25 @@ func New(config *Config) *Client {
 		panic("config is required")
 	}
 
-	listen := config.Listen
+	if len(config.Listeners) <= 0 {
+		config.Listeners = append(config.Listeners, &NetPort{
+			Port:  defaultDnsPort,
+			Proto: defaultDnsProto,
+		})
+	} else {
+		for _, listener := range config.Listeners {
+			switch listener.Proto {
 
-	if listen == nil {
-		listen = &NetPort{}
-	}
+			case types.ProtoTypeUDP, types.ProtoTypeTCP:
 
-	switch listen.Proto {
+			default:
+				listener.Proto = types.ProtoTypeUDP
+			}
 
-	case types.ProtoTypeUDP, types.ProtoTypeTCP:
-
-	default:
-		listen.Proto = types.ProtoTypeUDP
-	}
-
-	if listen.Port <= 0 {
-		listen.Port = defaultDnsPort
+			if listener.Port <= 0 {
+				listener.Port = defaultDnsPort
+			}
+		}
 	}
 
 	var nameservers []*NetPort
@@ -96,7 +107,7 @@ func New(config *Config) *Client {
 
 	return &Client{
 		debug:        config.Debug,
-		listen:       listen,
+		listeners:    config.Listeners,
 		udpDnsClient: &dns.Client{Net: "udp", SingleInflight: true},
 		tcpDnsClient: &dns.Client{Net: "tcp", SingleInflight: true},
 		aRecords:     make(map[string]*ARecord),
@@ -155,17 +166,37 @@ func (t *Client) Run(ctx context.Context) error {
 		zap.L().Debug("Forwarding to nameservers is not enabled")
 	}
 
-	server := &dns.Server{Addr: t.listen.IP + ":" + strconv.Itoa(t.listen.Port), Net: t.listen.Proto.String()}
+	errs := make(chan error, len(t.listeners))
 
-	go func() {
-		<-ctx.Done()
-		zap.L().Debug("Shutting down")
-		server.Shutdown()
-	}()
+	var servers []*dns.Server
 
-	zap.L().Info(fmt.Sprintf("Starting server on %s/%s", t.listen.IP+":"+strconv.Itoa(t.listen.Port), t.listen.Proto.String()))
+	for _, listener := range t.listeners {
+		zap.L().Info(fmt.Sprintf("Starting server on %s/%s", listener.IP+":"+strconv.Itoa(listener.Port), listener.Proto.String()))
+		server := &dns.Server{Addr: listener.IP + ":" + strconv.Itoa(listener.Port), Net: listener.Proto.String()}
+		servers = append(servers, server)
 
-	return server.ListenAndServe()
+		go func() {
+			err := server.ListenAndServe()
+			if err != nil {
+				errs <- err
+			}
+		}()
+
+	}
+
+	var err error
+
+	select {
+
+	case err = <-errs:
+		zap.L().Info("Shutting down or error")
+
+	case <-ctx.Done():
+		zap.L().Info("Shutting down or signal")
+
+	}
+
+	return err
 }
 
 func (t *Client) handleLocal(w dns.ResponseWriter, r *dns.Msg) {

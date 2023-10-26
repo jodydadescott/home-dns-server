@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"strings"
 
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v2"
@@ -22,8 +23,10 @@ import (
 )
 
 const (
-	BinaryName  = "unifi-dns-server"
-	CodeVersion = "1.0.0"
+	BinaryName   = "unifi-dns-server"
+	CodeVersion  = "1.0.1"
+	DebugEnvVar  = "DEBUG"
+	ConfigEnvVar = "CONFIG"
 )
 
 type Config = types.Config
@@ -82,8 +85,14 @@ var (
 
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			if configFileArg == "" {
-				return fmt.Errorf("configFile is required")
+			configFile := configFileArg
+
+			if configFile == "" {
+				configFile = os.Getenv(ConfigEnvVar)
+			}
+
+			if configFile == "" {
+				return fmt.Errorf("configFile is required; set using option or env var %s", ConfigEnvVar)
 			}
 
 			config, err := getConfig(configFileArg)
@@ -91,7 +100,17 @@ var (
 				return err
 			}
 
+			debugEnabled := false
 			if debugEnabledArg {
+				debugEnabled = true
+			} else {
+				debugOsEnvVar := strings.ToLower(os.Getenv(DebugEnvVar))
+				if debugOsEnvVar == "enabled" {
+					debugEnabled = true
+				}
+			}
+
+			if debugEnabled {
 				zap.ReplaceGlobals(logging.GetDebugZapLogger())
 				zap.L().Debug("debug is enabled")
 			} else {
@@ -100,7 +119,7 @@ var (
 
 			serverConfig := &server.Config{
 				Debug:       debugEnabledArg,
-				Listen:      config.Listen,
+				Listeners:   config.Listeners,
 				Nameservers: config.Nameservers,
 			}
 
@@ -174,8 +193,8 @@ func Execute() error {
 }
 
 func init() {
-	runCmd.PersistentFlags().StringVarP(&configFileArg, "config", "c", "", "config file")
-	runCmd.PersistentFlags().BoolVarP(&debugEnabledArg, "debug", "d", false, "debug to STDERR")
+	runCmd.PersistentFlags().StringVarP(&configFileArg, "config", "c", "", fmt.Sprintf("config file; env var is %s", ConfigEnvVar))
+	runCmd.PersistentFlags().BoolVarP(&debugEnabledArg, "debug", "d", false, fmt.Sprintf("debug to STDERR; env var is %s", ConfigEnvVar))
 	generateConfigCmd.AddCommand(generateJsonConfigCmd, generatePrettyJsonConfigCmd, generateYamlConfigCmd)
 	rootCmd.AddCommand(versionCmd, runCmd, generateConfigCmd)
 }
