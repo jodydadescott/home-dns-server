@@ -1,28 +1,38 @@
 package types
 
+import (
+	"github.com/jodydadescott/home-dns-server/types/proto"
+	logger "github.com/jodydadescott/jody-go-logger"
+)
+
 func NewExampleConfig() *Config {
 
 	d := &Domain{
 		Domain: "home",
 	}
 
-	d.AddARecords(&ARecord{
+	d.Records.AddARecords(&ARecord{
 		Hostname: "a_record_1",
 		IP:       "192.168.1.1",
 	})
 
-	d.AddARecords(&ARecord{
+	d.Records.AddARecords(&ARecord{
 		Hostname: "a_record_2",
 		IP:       "192.168.1.2",
 	})
 
-	d.AddCNameRecords(&CNameRecord{
+	d.Records.AddAAAARecords(&ARecord{
+		Hostname: "a_record_1",
+		IP:       "2001:db8:3333:4444:5555:6666:7777:8888",
+	})
+
+	d.Records.AddCNameRecords(&CNameRecord{
 		AliasHostname:  "cname_record_1",
 		TargetHostname: "a_record_1",
 		TargetDomain:   DefaultDomain,
 	})
 
-	d.AddCNameRecords(&CNameRecord{
+	d.Records.AddCNameRecords(&CNameRecord{
 		AliasHostname:  "cname_record_2",
 		TargetHostname: "a_record_2",
 		TargetDomain:   DefaultDomain,
@@ -35,25 +45,30 @@ func NewExampleConfig() *Config {
 	unifiConfig.Hostname = "https://10.0.1.1"
 	unifiConfig.Username = "homeauto"
 	unifiConfig.Password = "******"
+	unifiConfig.Domain = "home"
 
 	unifiConfig.Enabled = true
+	unifiConfig.Refresh = DefaultRefresh
 
 	unifiConfig.AddIgnoreMacs("60:22:32:9f:0f:fd")
 
 	listener1 := &NetPort{
 		Port:  53,
-		Proto: ProtoTypeUDP,
+		Proto: proto.UDP,
 	}
 
 	listener2 := &NetPort{
 		Port:  53,
-		Proto: ProtoTypeTCP,
+		Proto: proto.TCP,
 	}
 
 	c := &Config{
 		Notes:  "PTR records will automatically be created",
 		Unifi:  unifiConfig,
 		Static: static,
+		Logging: &Logger{
+			LogLevel: logger.DebugLevel,
+		},
 	}
 
 	c.AddListeners(listener1, listener2)
@@ -61,20 +76,27 @@ func NewExampleConfig() *Config {
 	c.AddNameservers(&NetPort{
 		IP:    "8.8.8.8",
 		Port:  53,
-		Proto: ProtoTypeUDP,
+		Proto: proto.UDP,
 	})
 
 	c.AddNameservers(&NetPort{
 		IP:    "4.4.4.4",
 		Port:  53,
-		Proto: ProtoTypeTCP,
+		Proto: proto.TCP,
 	})
 
 	c.AddNameservers(&NetPort{
 		IP:    "1.1.1.1",
 		Port:  4053,
-		Proto: ProtoTypeTCP,
+		Proto: proto.TCP,
 	})
+
+	c.HttpConfig = &HttpConfig{
+		Enabled: true,
+		Listener: &NetPort{
+			Port: 8080,
+		},
+	}
 
 	return c
 }

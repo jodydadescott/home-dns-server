@@ -2,50 +2,24 @@ package types
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
+	"time"
 
 	"github.com/jinzhu/copier"
+	logger "github.com/jodydadescott/jody-go-logger"
 	"github.com/jodydadescott/unifi-go-sdk"
+
+	"github.com/jodydadescott/home-dns-server/types/proto"
 )
 
-// ProtoType is the protocol type. Currently only UDP and TCP are supported.
-type ProtoType string
-
-const (
-	ProtoTypeInvalid ProtoType = "INVALID"
-	ProtoTypeUDP               = "udp"
-	ProtoTypeTCP               = "tcp"
-)
-
-const (
-	DefaultDomain = "home"
-)
-
-var space = regexp.MustCompile(`\s+`)
-
-// String returns string value of the protocol type
-func (t ProtoType) String() string {
-
-	switch t {
-
-	case ProtoTypeUDP:
-		return string(t)
-
-	case ProtoTypeTCP:
-		return string(t)
-
-	}
-
-	panic("Invalid proto type")
-}
+type Logger = logger.Config
 
 // Netport is the IP, Port and Protocol type
 type NetPort struct {
-	IP          string    `json:"ip,omitempty" yaml:"ip,omitempty"`
-	Port        int       `json:"port,omitempty" yaml:"port,omitempty"`
-	Proto       ProtoType `json:"proto,omitempty" yaml:"proto,omitempty"`
-	ipColonPort string    `json:"-"`
+	IP          string      `json:"ip,omitempty" yaml:"ip,omitempty"`
+	Port        int         `json:"port,omitempty" yaml:"port,omitempty"`
+	Proto       proto.Proto `json:"proto,omitempty" yaml:"proto,omitempty"`
+	ipColonPort string      `json:"-"`
 }
 
 // Clone return copy
@@ -55,14 +29,14 @@ func (t *NetPort) Clone() *NetPort {
 	return c
 }
 
-// SetProtoTypeTCP sets proto type to TCP
-func (t *NetPort) SetProtoTypeTCP() {
-	t.Proto = ProtoTypeTCP
+// SetProtoTCP sets proto type to TCP
+func (t *NetPort) SetProtoTCP() {
+	t.Proto = proto.TCP
 }
 
-// SetProtoTypeTCP sets proto type to UDP
-func (t *NetPort) SetProtoTypeUDP() {
-	t.Proto = ProtoTypeUDP
+// SetProtoUDP sets proto type to UDP
+func (t *NetPort) SetProtoUDP() {
+	t.Proto = proto.UDP
 }
 
 // GetIPColonPort returns the IP + colong + port as a string
@@ -92,7 +66,7 @@ func (t *ARecord) Clone() *ARecord {
 // GetKey returns the key for the record type
 func (t *ARecord) GetKey() string {
 	if t.fqdn == "" {
-		t.fqdn = cleanHostname(t.Hostname) + "." + t.Domain + "."
+		t.fqdn = t.Hostname + "." + t.Domain + "."
 	}
 	return t.fqdn
 }
@@ -123,7 +97,7 @@ func (t *CNameRecord) Clone() *CNameRecord {
 // GetKey returns the key for the record type
 func (t *CNameRecord) GetKey() string {
 	if t.fqdnAlias == "" {
-		t.fqdnAlias = cleanHostname(t.AliasHostname) + "." + t.AliasDomain + "."
+		t.fqdnAlias = t.AliasHostname + "." + t.AliasDomain + "."
 	}
 	return t.fqdnAlias
 }
@@ -131,7 +105,7 @@ func (t *CNameRecord) GetKey() string {
 // GetValue returns the value for the record type
 func (t *CNameRecord) GetValue() string {
 	if t.fqdnTarget == "" {
-		t.fqdnTarget = cleanHostname(t.TargetHostname) + "." + t.TargetDomain + "."
+		t.fqdnTarget = t.TargetHostname + "." + t.TargetDomain + "."
 	}
 	return t.fqdnTarget
 }
@@ -160,7 +134,7 @@ func (t *PTRrecord) GetKey() string {
 // GetValue returns the value for the record type
 func (t *PTRrecord) GetValue() string {
 	if t.fqdn == "" {
-		t.fqdn = cleanHostname(t.Hostname) + "." + t.Domain + "."
+		t.fqdn = t.Hostname + "." + t.Domain + "."
 	}
 	return t.fqdn
 }
@@ -172,6 +146,21 @@ type Config struct {
 	Listeners   []*NetPort    `json:"listeners,omitempty" yaml:"listeners,omitempty"`
 	Static      *StaticConfig `json:"static,omitempty" yaml:"static,omitempty"`
 	Nameservers []*NetPort    `json:"nameservers,omitempty" yaml:"nameservers,omitempty"`
+	Logging     *Logger       `json:"logging,omitempty" yaml:"logging,omitempty"`
+	HttpConfig  *HttpConfig   `json:"httpConfig,omitempty" yaml:"httpConfig,omitempty"`
+}
+
+// HttpConfig is the config for HTTP servers
+type HttpConfig struct {
+	Listener *NetPort `json:"listener,omitempty" yaml:"listener,omitempty"`
+	Enabled  bool     `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+}
+
+// Clone return copy
+func (t *HttpConfig) Clone() *HttpConfig {
+	c := &HttpConfig{}
+	copier.Copy(&c, &t)
+	return c
 }
 
 // Clone return copy
@@ -200,9 +189,10 @@ func (t *Config) AddListeners(listeners ...*NetPort) *Config {
 // UnifiConfig is the config for Unifi servers
 type UnifiConfig struct {
 	unifi.Config
-	Enabled    bool     `json:"enabled,omitempty" yaml:"enabled,omitempty"`
-	Domain     string   `json:"domain,omitempty" yaml:"domain,omitempty"`
-	IgnoreMacs []string `json:"ignoreMacs,omitempty" yaml:"ignoreMacs,omitempty"`
+	Refresh    time.Duration `json:"refresh,omitempty" yaml:"refresh,omitempty"`
+	Enabled    bool          `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	Domain     string        `json:"domain,omitempty" yaml:"domain,omitempty"`
+	IgnoreMacs []string      `json:"ignoreMacs,omitempty" yaml:"ignoreMacs,omitempty"`
 }
 
 // Clone return copy
@@ -249,10 +239,8 @@ func (t *StaticConfig) Clone() *StaticConfig {
 // of CNAME target domains if not configured. It is not normally required to add PTR
 // records as they will be automatically generated when the A record is created.
 type Domain struct {
-	Domain       string         `json:"domain,omitempty" yaml:"dnsDomain,omitempty"`
-	ARecords     []*ARecord     `json:"aRecords,omitempty" yaml:"aRecords,omitempty"`
-	CnameRecords []*CNameRecord `json:"cnameRecords,omitempty" yaml:"cnameRecords,omitempty"`
-	PtrRecords   []*PTRrecord   `json:"ptrRecords,omitempty" yaml:"ptrRecords,omitempty"`
+	Domain  string        `json:"domain,omitempty" yaml:"dnsDomain,omitempty"`
+	Records DomainRecords `json:"records,omitempty" yaml:"records,omitempty"`
 }
 
 // Clone return copy
@@ -260,6 +248,13 @@ func (t *Domain) Clone() *Domain {
 	c := &Domain{}
 	copier.Copy(&c, &t)
 	return c
+}
+
+type DomainRecords struct {
+	ARecords     []*ARecord     `json:"aRecords,omitempty" yaml:"aRecords,omitempty"`
+	AAAARecords  []*ARecord     `json:"aaaRecords,omitempty" yaml:"aaaRecords,omitempty"`
+	CnameRecords []*CNameRecord `json:"cnameRecords,omitempty" yaml:"cnameRecords,omitempty"`
+	PtrRecords   []*PTRrecord   `json:"ptrRecords,omitempty" yaml:"ptrRecords,omitempty"`
 }
 
 // AddDomain is a convenience function that adds the specified Domaain to the StaticConfig
@@ -271,14 +266,22 @@ func (t *StaticConfig) AddDomains(domains ...*Domain) *StaticConfig {
 }
 
 // AddARecord is a convenience that adds the specified ARecord to the Domain
-func (t *Domain) AddARecords(records ...*ARecord) *Domain {
+func (t *DomainRecords) AddARecords(records ...*ARecord) *DomainRecords {
 	for _, v := range records {
 		t.ARecords = append(t.ARecords, v)
 	}
 	return t
 }
 
-func (t *Domain) AddPtrRecords(records ...*PTRrecord) *Domain {
+// AddARecord is a convenience that adds the specified ARecord to the Domain
+func (t *DomainRecords) AddAAAARecords(records ...*ARecord) *DomainRecords {
+	for _, v := range records {
+		t.AAAARecords = append(t.AAAARecords, v)
+	}
+	return t
+}
+
+func (t *DomainRecords) AddPtrRecords(records ...*PTRrecord) *DomainRecords {
 	for _, v := range records {
 		t.PtrRecords = append(t.PtrRecords, v)
 	}
@@ -286,7 +289,7 @@ func (t *Domain) AddPtrRecords(records ...*PTRrecord) *Domain {
 }
 
 // CNameRecord is a convenience that adds the specified CNameRecord to the Domain
-func (t *Domain) AddCNameRecords(records ...*CNameRecord) *Domain {
+func (t *DomainRecords) AddCNameRecords(records ...*CNameRecord) *DomainRecords {
 	for _, v := range records {
 		t.CnameRecords = append(t.CnameRecords, v)
 	}

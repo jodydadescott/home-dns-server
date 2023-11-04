@@ -4,27 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/signal"
-	"strings"
 
-	"go.uber.org/zap"
 	"gopkg.in/yaml.v2"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/hokaccha/go-prettyjson"
 	"github.com/jodydadescott/home-dns-server/server"
-	"github.com/jodydadescott/home-dns-server/static"
 	"github.com/jodydadescott/home-dns-server/types"
-	"github.com/jodydadescott/home-dns-server/unifi"
-	"github.com/jodydadescott/jody-zap-logging/logging"
 	"github.com/spf13/cobra"
+
+	logger "github.com/jodydadescott/jody-go-logger"
 )
 
 const (
-	BinaryName   = "unifi-dns-server"
-	CodeVersion  = "1.0.1"
+	BinaryName   = "home-dns-server"
 	DebugEnvVar  = "DEBUG"
 	ConfigEnvVar = "CONFIG"
 )
@@ -32,12 +27,11 @@ const (
 type Config = types.Config
 
 var (
-	configFileArg   string
-	debugEnabledArg bool
+	configFileArg string
+	debugLevelArg string
 
 	rootCmd = &cobra.Command{
 		Use: BinaryName,
-		//SilenceUsage: true,
 	}
 
 	generateConfigCmd = &cobra.Command{
@@ -74,7 +68,7 @@ var (
 	versionCmd = &cobra.Command{
 		Use: "version",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Println(CodeVersion)
+			fmt.Println(types.CodeVersion)
 			return nil
 		},
 	}
@@ -100,46 +94,21 @@ var (
 				return err
 			}
 
-			debugEnabled := false
-			if debugEnabledArg {
-				debugEnabled = true
-			} else {
-				debugOsEnvVar := strings.ToLower(os.Getenv(DebugEnvVar))
-				if debugOsEnvVar == "enabled" {
-					debugEnabled = true
+			debugLevel := debugLevelArg
+			if debugLevel == "" {
+				debugLevel = os.Getenv(DebugEnvVar)
+			}
+			if debugLevel != "" {
+				if config.Logging == nil {
+					config.Logging = &logger.Config{}
+				}
+				err := config.Logging.ParseLogLevel(debugLevel)
+				if err != nil {
+					return err
 				}
 			}
 
-			if debugEnabled {
-				zap.ReplaceGlobals(logging.GetDebugZapLogger())
-				zap.L().Debug("debug is enabled")
-			} else {
-				zap.ReplaceGlobals(logging.GetDefaultZapLogger())
-			}
-
-			serverConfig := &server.Config{
-				Debug:       debugEnabledArg,
-				Listeners:   config.Listeners,
-				Nameservers: config.Nameservers,
-			}
-
-			if config.Unifi != nil && config.Unifi.Enabled {
-				zap.L().Debug("Unifi is enabled")
-				serverConfig.AddProvider(unifi.New(config.Unifi))
-			} else {
-				zap.L().Debug("Unifi is not enabled")
-			}
-
-			if config.Static != nil && config.Static.Enabled {
-				zap.L().Debug("static config is enabled")
-				for _, v := range static.New(config.Static) {
-					serverConfig.AddProvider(v)
-				}
-			} else {
-				zap.L().Debug("static config is not enabled")
-			}
-
-			s := server.New(serverConfig)
+			s := server.New(config)
 
 			ctx, cancel := context.WithCancel(cmd.Context())
 
@@ -164,7 +133,7 @@ func getConfig(configFile string) (*Config, error) {
 
 	var errs *multierror.Error
 
-	content, err := ioutil.ReadFile(configFile)
+	content, err := os.ReadFile(configFile)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +163,7 @@ func Execute() error {
 
 func init() {
 	runCmd.PersistentFlags().StringVarP(&configFileArg, "config", "c", "", fmt.Sprintf("config file; env var is %s", ConfigEnvVar))
-	runCmd.PersistentFlags().BoolVarP(&debugEnabledArg, "debug", "d", false, fmt.Sprintf("debug to STDERR; env var is %s", ConfigEnvVar))
+	runCmd.PersistentFlags().StringVarP(&debugLevelArg, "debug", "d", "", fmt.Sprintf("debug level (TRACE, DEBUG, INFO, WARN, ERROR) to STDERR; env var is %s", ConfigEnvVar))
 	generateConfigCmd.AddCommand(generateJsonConfigCmd, generatePrettyJsonConfigCmd, generateYamlConfigCmd)
 	rootCmd.AddCommand(versionCmd, runCmd, generateConfigCmd)
 }

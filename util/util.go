@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strings"
 )
 
@@ -14,6 +15,8 @@ const (
 	// IP6arpa is the reverse tree suffix for v6 IP addresses.
 	IP6arpa = ".ip6.arpa"
 )
+
+var space = regexp.MustCompile(`\s+`)
 
 // e.0.0.2.0.0.0.0.0.0.0.0.0.0.0.0.7.0.8.0.f.0.0.4.0.b.8.f.7.0.6.2.ip6.arpa domain name pointer den16s09-in-x0e.1e100.net.
 // e.0.0.2.0.0.0.0.0.0.0.0.0.0.0.0.7.0.8.0.f.0.0.4.0.b.8.f.7.0.6.2.ip6.arpa domain name pointer den16s05-in-x0e.1e100.net.
@@ -192,4 +195,42 @@ func uitoa(val uint) string {
 	// val < 10
 	buf[i] = byte('0' + val)
 	return string(buf[i:])
+}
+
+func GetHostname(input string) string {
+	input = strings.ToLower(input)
+	input = space.ReplaceAllString(input, "-")
+
+	return strings.Split(input, ".")[0]
+
+	// if !strings.Contains(input, ".") {
+	// 	return input
+	// }
+
+	// hostname := ""
+	// domainname := ""
+
+	// inputSplit := strings.Split(input, ".")
+	// for i, v := range inputSplit {
+
+	// 	switch i {
+
+	// 	case 0:
+	// 		hostname = v
+
+	// 	case 1:
+	// 		domainname = v
+
+	// 	default:
+	// 		domainname = domainname + "." + v
+
+	// 	}
+
+	// }
+
+	// if string(domainname[len(domainname)-1]) == "." {
+	// 	domainname = domainname[0 : len(domainname)-1]
+	// }
+
+	// return hostname, domainname
 }

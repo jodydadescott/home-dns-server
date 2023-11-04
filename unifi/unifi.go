@@ -3,6 +3,7 @@ package unifi
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jodydadescott/home-dns-server/types"
 	"github.com/jodydadescott/home-dns-server/util"
@@ -13,13 +14,13 @@ import (
 type Config = types.UnifiConfig
 type ARecord = types.ARecord
 type PTRrecord = types.PTRrecord
-type Domain = types.Domain
+type Records = types.DomainRecords
 
 type Client struct {
 	unifiClient *unifi.Client
 	config      *Config
 	ignoreMacs  []string
-	domain      string
+	domainname  string
 }
 
 const (
@@ -53,12 +54,25 @@ func New(config *Config) *Client {
 
 	return &Client{
 		config:      config,
-		domain:      domain,
+		domainname:  domain,
 		unifiClient: unifi.New(&config.Config),
 	}
 }
 
-func (t *Client) GetDomain() (*Domain, error) {
+func (t *Client) GetRefreshDuration() time.Duration {
+	return t.config.Refresh
+}
+
+func (t *Client) GetDomainName() string {
+	return t.domainname
+}
+
+func (t *Client) GetName() string {
+	return "unifi"
+}
+
+// GetRecords() (*Records, error)
+func (t *Client) GetRecords() (*Records, error) {
 
 	clients, err := t.unifiClient.GetClients()
 	if err != nil {
@@ -70,56 +84,86 @@ func (t *Client) GetDomain() (*Domain, error) {
 		return nil, err
 	}
 
-	domain := &Domain{
-		Domain: t.domain,
-	}
+	records := &Records{}
 
 	for _, client := range clients {
 
-		name := client.Name
+		rawName := client.Name
 
-		if name == "" {
-			name = client.Hostname
+		if rawName == "" {
+			rawName = client.Hostname
 		}
 
-		if name == "" {
+		if rawName == "" {
+			rawName = client.DisplayName
+		}
+
+		if rawName == "" {
 			zap.L().Debug(fmt.Sprintf("Client with MAC=%s and IP=%s does not have a name", client.Mac, client.IP))
 			continue
 		}
 
-		if client.IP == "" {
-			zap.L().Debug(fmt.Sprintf("Client %s does not have an IP", name))
+		ipV6 := getIpV6String(client.Ipv6Address)
+
+		if client.IP == "" && ipV6 == "" {
+			zap.L().Debug(fmt.Sprintf("Client %s does not have an IPv4 or IPv6", rawName))
 			continue
 		}
 
-		arpa, err := util.GetARPA(client.IP)
-		if err != nil {
-			zap.L().Debug(fmt.Sprintf("Client %s has an invalid IP; error %s", name, err.Error()))
-			continue
+		name := util.GetHostname(rawName)
+
+		addRecord := func(ip, iptype string) {
+
+			arpa, err := util.GetARPA(ip)
+
+			if err != nil {
+				zap.L().Debug(fmt.Sprintf("Client %s has an invalid IP; error %s", name, err.Error()))
+				return
+			}
+
+			a := &ARecord{
+				Hostname: name,
+				Domain:   t.domainname,
+				IP:       ip,
+				SRC:      source + ":unifi-client",
+			}
+
+			switch iptype {
+			case "A":
+				records.AddARecords(a)
+
+			case "AAAA":
+				records.AddAAAARecords(a)
+
+			default:
+				panic("this should not happen")
+
+			}
+
+			p := &PTRrecord{
+				ARPA:     arpa,
+				Hostname: name,
+				Domain:   t.domainname,
+				SRC:      source + ":unifi-client",
+			}
+
+			records.AddPtrRecords(p)
 		}
 
-		a := &ARecord{
-			Hostname: name,
-			Domain:   t.domain,
-			IP:       client.IP,
-			SRC:      source + ":unifi-client",
+		if client.IP != "" {
+			addRecord(client.IP, "A")
 		}
 
-		domain.AddARecords(a)
-
-		p := &PTRrecord{
-			ARPA:     arpa,
-			Hostname: name,
-			Domain:   t.domain,
-			SRC:      source + ":unifi-client",
+		if ipV6 != "" {
+			addRecord(ipV6, "AAAA")
 		}
 
-		domain.AddPtrRecords(p)
-
-		zap.L().Debug(fmt.Sprintf("Added %s %s A %s and %s PTR %s", a.SRC, a.GetKey(), a.GetValue(), p.GetKey(), p.GetValue()))
 	}
 
 	for _, enrichedConfig := range enrichedConfigs {
+
+		// TODO add IPv6 support here
+		// enrichedConfig.Configuration.Ipv6ClientAddressAssignment
 
 		name := strings.ToLower(enrichedConfig.Configuration.Name)
 		ip := strings.Split(enrichedConfig.Configuration.IPSubnet, "/")[0]
@@ -149,23 +193,21 @@ func (t *Client) GetDomain() (*Domain, error) {
 
 		a := &ARecord{
 			Hostname: interfaceName,
-			Domain:   t.domain,
+			Domain:   t.domainname,
 			IP:       ip,
 			SRC:      source + ":unifi-interface",
 		}
 
-		domain.AddARecords(a)
+		records.AddARecords(a)
 
 		p := &PTRrecord{
 			ARPA:     arpa,
 			Hostname: interfaceName,
-			Domain:   t.domain,
+			Domain:   t.domainname,
 			SRC:      source + ":unifi-interface",
 		}
 
-		domain.AddPtrRecords(p)
-
-		zap.L().Debug(fmt.Sprintf("Added %s %s A %s and %s PTR %s", a.SRC, a.GetKey(), a.GetValue(), p.GetKey(), p.GetValue()))
+		records.AddPtrRecords(p)
 	}
 
 	devices, err := t.unifiClient.GetDevices()
@@ -198,26 +240,41 @@ func (t *Client) GetDomain() (*Domain, error) {
 
 		a := &ARecord{
 			Hostname: device.Name,
-			Domain:   t.domain,
+			Domain:   t.domainname,
 			IP:       device.IP,
 			SRC:      source + ":unifi-device",
 		}
 
-		domain.AddARecords(a)
+		records.AddARecords(a)
 
 		p := &PTRrecord{
 			ARPA:     arpa,
 			Hostname: device.Name,
-			Domain:   t.domain,
+			Domain:   t.domainname,
 			SRC:      source + ":unifi-device",
 		}
 
-		domain.AddPtrRecords(p)
-
-		zap.L().Debug(fmt.Sprintf("Added %s %s A %s and %s PTR %s", a.SRC, a.GetKey(), a.GetValue(), p.GetKey(), p.GetValue()))
-
+		records.AddPtrRecords(p)
 	}
 
-	return domain, nil
+	return records, nil
 
+}
+
+func getIpV6String(input []string) string {
+
+	ipV6 := ""
+	ipV6Len := len(input)
+
+	if ipV6Len > 0 {
+		for i, v := range input {
+			if i == ipV6Len-1 {
+				ipV6 = ipV6 + v
+			} else {
+				ipV6 = ipV6 + v + ":"
+			}
+		}
+	}
+
+	return ipV6
 }

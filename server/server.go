@@ -2,368 +2,118 @@ package server
 
 import (
 	"context"
-	"fmt"
-	"strconv"
 
-	"github.com/jinzhu/copier"
-	"github.com/miekg/dns"
+	logger "github.com/jodydadescott/jody-go-logger"
 	"go.uber.org/zap"
 
+	"github.com/jodydadescott/home-dns-server/dns"
+	"github.com/jodydadescott/home-dns-server/http"
+	"github.com/jodydadescott/home-dns-server/static"
 	"github.com/jodydadescott/home-dns-server/types"
+	"github.com/jodydadescott/home-dns-server/unifi"
 )
 
-const (
-	defaultDnsProto  = types.ProtoTypeUDP
-	defaultDnsPort   = 53
-	defaultDnsDomain = "home"
-)
+type Config = types.Config
 
-type NetPort = types.NetPort
-type ProtoType = types.ProtoType
-type Domain = types.Domain
-type ARecord = types.ARecord
-type PTRrecord = types.PTRrecord
-type CNameRecord = types.CNameRecord
-
-type Config struct {
-	Providers   []Provider
-	Debug       bool
-	Listeners   []*NetPort
-	Nameservers []*NetPort
+type Server struct {
+	dns  *dns.Server
+	http *http.Server
 }
 
-// Clone return copy
-func (t *Config) Clone() *Config {
-	c := &Config{}
-	copier.Copy(&c, &t)
-	return c
-}
+func New(config *Config) *Server {
 
-func (t *Config) AddProvider(provider Provider) {
-	t.Providers = append(t.Providers, provider)
-}
+	trace := false
 
-type Client struct {
-	debug        bool
-	listeners    []*NetPort
-	domains      []string
-	udpDnsClient *dns.Client
-	tcpDnsClient *dns.Client
-	providers    []Provider
-	aRecords     map[string]*ARecord
-	ptrRecords   map[string]*PTRrecord
-	cnameRecords map[string]*CNameRecord
-	nameservers  []*NetPort
-}
+	if config.Logging != nil {
+		logger.SetConfig(config.Logging)
 
-type Provider interface {
-	GetDomain() (*Domain, error)
-}
+		if config.Logging.LogLevel == logger.TraceLevel {
+			trace = true
+		}
 
-func New(config *Config) *Client {
-
-	if config == nil {
-		panic("config is required")
 	}
 
-	if len(config.Listeners) <= 0 {
-		config.Listeners = append(config.Listeners, &NetPort{
-			Port:  defaultDnsPort,
-			Proto: defaultDnsProto,
-		})
+	dnsConfig := &dns.Config{
+		Listeners:   config.Listeners,
+		Nameservers: config.Nameservers,
+		Trace:       trace,
+	}
+
+	if config.Unifi != nil && config.Unifi.Enabled {
+		zap.L().Debug("Unifi is enabled")
+		dnsConfig.AddProvider(unifi.New(config.Unifi))
 	} else {
-		for _, listener := range config.Listeners {
-			switch listener.Proto {
-
-			case types.ProtoTypeUDP, types.ProtoTypeTCP:
-
-			default:
-				listener.Proto = types.ProtoTypeUDP
-			}
-
-			if listener.Port <= 0 {
-				listener.Port = defaultDnsPort
-			}
-		}
+		zap.L().Debug("Unifi is not enabled")
 	}
 
-	var nameservers []*NetPort
-	for _, nameserver := range config.Nameservers {
-
-		switch nameserver.Proto {
-
-		case types.ProtoTypeUDP, types.ProtoTypeTCP:
-
-		default:
-			nameserver.Proto = types.ProtoTypeUDP
+	if config.Static != nil && config.Static.Enabled {
+		zap.L().Debug("static config is enabled")
+		for _, v := range static.New(config.Static) {
+			dnsConfig.AddProvider(v)
 		}
-
-		if nameserver.Port <= 0 {
-			nameserver.Port = defaultDnsPort
-		}
-
-		nameservers = append(nameservers, nameserver)
+	} else {
+		zap.L().Debug("static config is not enabled")
 	}
 
-	return &Client{
-		debug:        config.Debug,
-		listeners:    config.Listeners,
-		udpDnsClient: &dns.Client{Net: "udp", SingleInflight: true},
-		tcpDnsClient: &dns.Client{Net: "tcp", SingleInflight: true},
-		aRecords:     make(map[string]*ARecord),
-		ptrRecords:   make(map[string]*PTRrecord),
-		cnameRecords: make(map[string]*CNameRecord),
-		nameservers:  nameservers,
-		providers:    config.Providers,
+	s := &Server{
+		dns: dns.New(dnsConfig),
 	}
+
+	if config.HttpConfig != nil && config.HttpConfig.Enabled {
+		zap.L().Debug("HTTP Server is enabled")
+
+		httpConfig := &http.Config{
+			Listener:       config.HttpConfig.Listener,
+			RecordProvider: s.dns,
+		}
+
+		s.http = http.New(httpConfig)
+
+	} else {
+		zap.L().Debug("HTTP Server is not enabled")
+	}
+
+	return s
 }
 
-func (t *Client) Run(ctx context.Context) error {
+func (t *Server) Run(ctx context.Context) error {
 
-	u := &uniq{}
+	errs := make(chan error, 2)
 
-	for _, provider := range t.providers {
+	dnsCtx, dnsCancel := context.WithCancel(ctx)
+	httpCtx, httpCancel := context.WithCancel(ctx)
 
-		domain, err := provider.GetDomain()
+	defer func() {
+		dnsCancel()
+		httpCancel()
+	}()
+
+	go func() {
+		err := t.dns.Run(dnsCtx)
 		if err != nil {
-			return err
+			errs <- err
 		}
+	}()
 
-		u.add(domain.Domain)
-
-		for _, r := range domain.ARecords {
-			t.aRecords[r.GetKey()] = r
-		}
-
-		for _, r := range domain.PtrRecords {
-			t.ptrRecords[r.GetKey()] = r
-		}
-
-		for _, r := range domain.CnameRecords {
-			t.cnameRecords[r.GetKey()] = r
-		}
-
-	}
-
-	for _, v := range u.names {
-		zap.L().Debug(fmt.Sprintf("Adding domain %s to be handled locally", v))
-		dns.HandleFunc(v+".", t.handleLocal)
-	}
-
-	dns.HandleFunc("10.in-addr.arpa.", t.handleLocal)
-	dns.HandleFunc("168.192.in-addr.arpa.", t.handleLocal)
-	dns.HandleFunc("0.0.16.127.in-addr.arpa.", t.handleLocal)
-	dns.HandleFunc("0.0.168.192.in-addr.arpa.", t.handleLocal)
-
-	if len(t.nameservers) > 0 {
-		for _, v := range t.nameservers {
-			zap.L().Debug(fmt.Sprintf("Forwarding to nameserver %s : %s", v.IP, v.Proto.String()))
-		}
-
-		dns.HandleFunc(".", t.handleRemote)
-
-	} else {
-		zap.L().Debug("Forwarding to nameservers is not enabled")
-	}
-
-	errs := make(chan error, len(t.listeners))
-
-	var servers []*dns.Server
-
-	for _, listener := range t.listeners {
-		zap.L().Info(fmt.Sprintf("Starting server on %s/%s", listener.IP+":"+strconv.Itoa(listener.Port), listener.Proto.String()))
-		server := &dns.Server{Addr: listener.IP + ":" + strconv.Itoa(listener.Port), Net: listener.Proto.String()}
-		servers = append(servers, server)
-
+	if t.http != nil {
 		go func() {
-			err := server.ListenAndServe()
+			err := t.http.Run(httpCtx)
 			if err != nil {
 				errs <- err
 			}
 		}()
-
 	}
-
-	var err error
 
 	select {
 
-	case err = <-errs:
+	case err := <-errs:
 		zap.L().Info("Shutting down or error")
+		return err
 
 	case <-ctx.Done():
 		zap.L().Info("Shutting down or signal")
 
 	}
 
-	return err
-}
-
-func (t *Client) handleLocal(w dns.ResponseWriter, r *dns.Msg) {
-	m := new(dns.Msg)
-	m.SetReply(r)
-	m.Compress = false
-
-	switch r.Opcode {
-	case dns.OpcodeQuery:
-
-		for _, q := range m.Question {
-
-			switch q.Qtype {
-
-			case dns.TypeA:
-				lookup := t.aRecords[q.Name]
-				if lookup != nil {
-					record := fmt.Sprintf("%s A %s", q.Name, lookup.GetValue())
-
-					if t.debug {
-						zap.L().Debug(fmt.Sprintf("success -> %s, source=%s", record, lookup.SRC))
-					}
-
-					rr, err := dns.NewRR(record)
-
-					if t.debug {
-						zap.L().Debug(record)
-					}
-
-					if err == nil {
-						m.Answer = append(m.Answer, rr)
-					} else {
-						zap.L().Error(err.Error())
-					}
-				} else {
-					if t.debug {
-						zap.L().Debug(fmt.Sprintf("fail -> %s has no A record", q.Name))
-					}
-				}
-
-			case dns.TypePTR:
-				lookup := t.ptrRecords[q.Name]
-				if lookup != nil {
-					record := fmt.Sprintf("%s PTR %s", q.Name, lookup.GetValue())
-
-					if t.debug {
-						zap.L().Debug(fmt.Sprintf("success -> %s, source=%s", record, lookup.SRC))
-					}
-
-					rr, err := dns.NewRR(record)
-
-					if t.debug {
-						zap.L().Debug(record)
-					}
-
-					if err == nil {
-						m.Answer = append(m.Answer, rr)
-					} else {
-						zap.L().Error(err.Error())
-					}
-				} else {
-					if t.debug {
-						zap.L().Debug(fmt.Sprintf("fail -> %s has no PTR record", q.Name))
-					}
-				}
-
-			case dns.TypeCNAME:
-				lookup := t.cnameRecords[q.Name]
-				if lookup != nil {
-					record := fmt.Sprintf("%s CNAME %s", q.Name, lookup.GetValue())
-
-					if t.debug {
-						zap.L().Debug(fmt.Sprintf("success -> %s, source=%s", record, lookup.SRC))
-					}
-
-					rr, err := dns.NewRR(record)
-
-					if t.debug {
-						zap.L().Debug(record)
-					}
-
-					if err == nil {
-						m.Answer = append(m.Answer, rr)
-					} else {
-						zap.L().Error(err.Error())
-					}
-				} else {
-					if t.debug {
-						zap.L().Debug(fmt.Sprintf("fail -> %s has no CNAME record", q.Name))
-					}
-				}
-
-			}
-		}
-
-	}
-
-	w.WriteMsg(m)
-}
-
-func (t *Client) handleRemote(w dns.ResponseWriter, r *dns.Msg) {
-
-	dnsClient := t.tcpDnsClient
-
-	for _, nameserver := range t.nameservers {
-
-		switch nameserver.Proto {
-
-		case types.ProtoTypeTCP:
-			dnsClient = t.tcpDnsClient
-
-		case types.ProtoTypeUDP:
-			dnsClient = t.udpDnsClient
-
-		}
-
-		if r, _, err := dnsClient.Exchange(r, nameserver.GetIPColonPort()); err == nil {
-			if r.Rcode == dns.RcodeSuccess {
-				r.Compress = true
-				w.WriteMsg(r)
-
-				if t.debug {
-					zap.L().Debug(fmt.Sprintf("Nameserver %s responded", nameserver.GetIPColonPort()))
-				}
-
-				return
-			}
-		}
-
-	}
-
-	// zap.L().Error("failure to forward request")
-
-	m := new(dns.Msg)
-	m.SetReply(r)
-	m.SetRcode(r, dns.RcodeServerFailure)
-	w.WriteMsg(m)
-}
-
-type uniq struct {
-	names []string
-}
-
-// func msgString(r *dns.Msg) string {
-// 	for _, v := range r.Question {
-// 		v.Name
-// 		v.
-// 	}
-// }
-
-// // Msg contains the layout of a DNS message.
-// type Msg struct {
-// 	MsgHdr
-// 	Compress bool       `json:"-"` // If true, the message will be compressed when converted to wire format.
-// 	Question []Question // Holds the RR(s) of the question section.
-// 	Answer   []RR       // Holds the RR(s) of the answer section.
-// 	Ns       []RR       // Holds the RR(s) of the authority section.
-// 	Extra    []RR       // Holds the RR(s) of the additional section.
-// }
-
-func (t *uniq) add(input string) {
-
-	for _, v := range t.names {
-		if v == input {
-			return
-		}
-	}
-
-	t.names = append(t.names, input)
+	return nil
 }
