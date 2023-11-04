@@ -102,10 +102,7 @@ var (
 				if config.Logging == nil {
 					config.Logging = &logger.Config{}
 				}
-				err := config.Logging.ParseLogLevel(debugLevel)
-				if err != nil {
-					return err
-				}
+				config.Logging.ParseLogLevel(debugLevel)
 			}
 
 			s := server.New(config)
