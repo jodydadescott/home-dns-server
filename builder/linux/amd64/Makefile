@@ -1,8 +1,10 @@
 all:
-	cd amd64 && $(MAKE)
+	cd bin && $(MAKE)
+	cd docker && $(MAKE)
 
 clean:
-	cd amd64 && $(MAKE) clean
+	cd bin && $(MAKE) clean
+	cd docker && $(MAKE) clean
 
 push:
-	cd amd64 && $(MAKE) push
+	cd docker && $(MAKE) push
