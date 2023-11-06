@@ -108,6 +108,9 @@ func (t *Server) GetRecords() *DomainRecords {
 func (t *Server) Run(ctx context.Context) error {
 
 	getARecord := func(name string) *ARecord {
+
+		name = strings.ToLower(name)
+
 		for _, client := range t.clients {
 			r := client.getARecord(name)
 			if r != nil {
@@ -118,6 +121,9 @@ func (t *Server) Run(ctx context.Context) error {
 	}
 
 	getAAAARecord := func(name string) *ARecord {
+
+		name = strings.ToLower(name)
+
 		for _, client := range t.clients {
 			r := client.getAAAARecord(name)
 			if r != nil {
@@ -128,6 +134,9 @@ func (t *Server) Run(ctx context.Context) error {
 	}
 
 	getPTRRecord := func(name string) *PTRrecord {
+
+		name = strings.ToLower(name)
+
 		for _, client := range t.clients {
 			r := client.getPTRRecord(name)
 			if r != nil {
@@ -138,6 +147,9 @@ func (t *Server) Run(ctx context.Context) error {
 	}
 
 	getCNameRecord := func(name string) *CNameRecord {
+
+		name = strings.ToLower(name)
+
 		for _, client := range t.clients {
 			r := client.getCNameRecord(name)
 			if r != nil {
