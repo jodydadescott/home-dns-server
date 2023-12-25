@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	logger "github.com/jodydadescott/jody-go-logger"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
 
@@ -21,7 +22,6 @@ type Server struct {
 	tcpDnsClient *dns.Client
 	clients      []*Client
 	nameservers  []*NetPort
-	trace        bool
 }
 
 func New(config *Config) *Server {
@@ -80,14 +80,13 @@ func New(config *Config) *Server {
 		udpDnsClient: &dns.Client{Net: "udp", SingleInflight: true},
 		tcpDnsClient: &dns.Client{Net: "tcp", SingleInflight: true},
 		nameservers:  nameservers,
-		trace:        config.Trace,
 	}
 
 	for _, provider := range config.Providers {
 		if provider == nil {
 			panic("nil provider")
 		}
-		c.clients = append(c.clients, newClient(provider, c.trace))
+		c.clients = append(c.clients, newClient(provider))
 	}
 
 	return c
@@ -184,20 +183,20 @@ func (t *Server) Run(ctx context.Context) error {
 					r.Compress = true
 					w.WriteMsg(r)
 
-					if t.trace {
+					if logger.Trace {
 						zap.L().Debug(fmt.Sprintf("Remote Nameserver %s responded with %s", nameserver.GetIPColonPort(), rString))
 					}
 
 					return
 				}
 			} else {
-				if t.trace {
+				if logger.Trace {
 					zap.L().Debug(fmt.Sprintf("Remote Nameserver %s responded with error %s", nameserver.GetIPColonPort(), err.Error()))
 				}
 			}
 		}
 
-		if t.trace {
+		if logger.Trace {
 			zap.L().Debug("failure to forward request")
 		}
 
@@ -226,7 +225,7 @@ func (t *Server) Run(ctx context.Context) error {
 					if lookup != nil {
 						record := fmt.Sprintf("%s A %s", q.Name, lookup.GetValue())
 
-						if t.trace {
+						if logger.Trace {
 							zap.L().Debug(fmt.Sprintf("success -> %s, source=%s", record, lookup.SRC))
 						}
 
@@ -241,7 +240,7 @@ func (t *Server) Run(ctx context.Context) error {
 						// local = true
 
 					} else {
-						if t.trace {
+						if logger.Trace {
 							zap.L().Debug(fmt.Sprintf("fail -> %s has no A record", q.Name))
 						}
 					}
@@ -251,7 +250,7 @@ func (t *Server) Run(ctx context.Context) error {
 					if lookup != nil {
 						record := fmt.Sprintf("%s AAAA %s", q.Name, lookup.GetValue())
 
-						if t.trace {
+						if logger.Trace {
 							zap.L().Debug(fmt.Sprintf("success -> %s, source=%s", record, lookup.SRC))
 						}
 
@@ -266,7 +265,7 @@ func (t *Server) Run(ctx context.Context) error {
 						// local = true
 
 					} else {
-						if t.trace {
+						if logger.Trace {
 							zap.L().Debug(fmt.Sprintf("fail -> %s has no AAAA record", q.Name))
 						}
 					}
@@ -276,7 +275,7 @@ func (t *Server) Run(ctx context.Context) error {
 					if lookup != nil {
 						record := fmt.Sprintf("%s PTR %s", q.Name, lookup.GetValue())
 
-						if t.trace {
+						if logger.Trace {
 							zap.L().Debug(fmt.Sprintf("success -> %s, source=%s", record, lookup.SRC))
 						}
 
@@ -291,7 +290,7 @@ func (t *Server) Run(ctx context.Context) error {
 						//	local = true
 
 					} else {
-						if t.trace {
+						if logger.Trace {
 							zap.L().Debug((fmt.Sprintf("fail -> %s has no PTR record", q.Name)))
 						}
 					}
@@ -301,7 +300,7 @@ func (t *Server) Run(ctx context.Context) error {
 					if lookup != nil {
 						record := fmt.Sprintf("%s CNAME %s", q.Name, lookup.GetValue())
 
-						if t.trace {
+						if logger.Trace {
 							zap.L().Debug(fmt.Sprintf("success -> %s, source=%s", record, lookup.SRC))
 						}
 
@@ -316,7 +315,7 @@ func (t *Server) Run(ctx context.Context) error {
 						// local = true
 
 					} else {
-						if t.trace {
+						if logger.Trace {
 							zap.L().Debug((fmt.Sprintf("fail -> %s has no CNAME record", q.Name)))
 						}
 					}
@@ -326,12 +325,7 @@ func (t *Server) Run(ctx context.Context) error {
 
 		}
 
-		//	if local {
 		w.WriteMsg(m)
-		return
-		//	}
-
-		//	handleRemote(w, r)
 	}
 
 	addDomainName := func(domainName string) {
@@ -364,7 +358,7 @@ func (t *Server) Run(ctx context.Context) error {
 
 	if len(t.nameservers) > 0 {
 		for _, v := range t.nameservers {
-			if t.trace {
+			if logger.Trace {
 				zap.L().Debug(fmt.Sprintf("Forwarding to nameserver %s : %s", v.IP, string(v.Proto)))
 			}
 		}
@@ -377,12 +371,9 @@ func (t *Server) Run(ctx context.Context) error {
 
 	errs := make(chan error, len(t.listeners))
 
-	var servers []*dns.Server
-
 	for _, listener := range t.listeners {
 		zap.L().Info(fmt.Sprintf("Starting server on %s/%s", listener.IP+":"+strconv.Itoa(listener.Port), string(listener.Proto)))
 		server := &dns.Server{Addr: listener.IP + ":" + strconv.Itoa(listener.Port), Net: string(listener.Proto)}
-		servers = append(servers, server)
 
 		go func() {
 			err := server.ListenAndServe()

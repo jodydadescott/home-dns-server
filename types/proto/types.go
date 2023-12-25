@@ -9,9 +9,9 @@ type Proto string
 
 const (
 	Empty   Proto = ""
-	UDP           = "udp"
-	TCP           = "tcp"
-	Invalid       = "INVALID"
+	UDP     Proto = "udp"
+	TCP     Proto = "tcp"
+	Invalid Proto = "INVALID"
 )
 
 // NewFromString returns enum value from string

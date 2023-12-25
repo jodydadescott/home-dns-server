@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	logger "github.com/jodydadescott/jody-go-logger"
+
 	"go.uber.org/zap"
 )
 
@@ -21,17 +23,15 @@ type Client struct {
 	aaaaRecords  map[string]*ARecord
 	ptrRecords   map[string]*PTRrecord
 	cnameRecords map[string]*CNameRecord
-	trace        bool
 }
 
-func newClient(provider Provider, trace bool) *Client {
+func newClient(provider Provider) *Client {
 	if provider == nil {
 		panic("provider is nil")
 	}
 
 	return &Client{
 		Provider: provider,
-		trace:    trace,
 	}
 }
 
@@ -70,9 +70,11 @@ func (t *Client) run() error {
 
 		if err == nil {
 			t.ticker.reset(t.GetRefreshDuration())
-		} else {
-			t.ticker.reset(errRefreshDuration)
+			return
 		}
+
+		zap.L().Error(fmt.Sprintf("Error on %s, setting retry interval to low; error is %s", t.GetName(), err.Error()))
+		t.ticker.reset(errRefreshDuration)
 	}
 
 	init := func() {
@@ -214,7 +216,7 @@ func (t *Client) refresh() error {
 			if r.Domain == "" {
 				r.Domain = t.GetDomainName()
 			}
-			if t.trace {
+			if logger.Trace {
 				zap.L().Debug(fmt.Sprintf("Loading %s record with key %s and value %s", "A", r.GetKey(), r.GetValue()))
 			}
 			aRecords[r.GetKey()] = r
@@ -227,7 +229,7 @@ func (t *Client) refresh() error {
 			if r.Domain == "" {
 				r.Domain = t.GetDomainName()
 			}
-			if t.trace {
+			if logger.Trace {
 				zap.L().Debug(fmt.Sprintf("Loading %s record with key %s and value %s", "AAAA", r.GetKey(), r.GetValue()))
 			}
 			aaaRecords[r.GetKey()] = r
@@ -240,7 +242,7 @@ func (t *Client) refresh() error {
 			if r.Domain == "" {
 				r.Domain = t.GetDomainName()
 			}
-			if t.trace {
+			if logger.Trace {
 				zap.L().Debug(fmt.Sprintf("Loading %s record with key %s and value %s", "PTR", r.GetKey(), r.GetValue()))
 			}
 			ptrRecords[r.GetKey()] = r
@@ -257,7 +259,7 @@ func (t *Client) refresh() error {
 				r.AliasDomain = t.GetDomainName()
 			}
 
-			if t.trace {
+			if logger.Trace {
 				zap.L().Debug(fmt.Sprintf("Loading %s record with key %s and value %s", "CNAME", r.GetKey(), r.GetValue()))
 			}
 			cnameRecords[r.GetKey()] = r
