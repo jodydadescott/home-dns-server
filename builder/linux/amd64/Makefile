@@ -1,10 +1,5 @@
-all:
-	cd bin && $(MAKE)
-	cd docker && $(MAKE)
+build:
+	env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -o home-dns-server ../../../home-dns-server.go
 
 clean:
-	cd bin && $(MAKE) clean
-	cd docker && $(MAKE) clean
-
-push:
-	cd docker && $(MAKE) push
+	$(RM) -f home-dns-server
