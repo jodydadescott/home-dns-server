@@ -7,6 +7,8 @@ all:
 clean:
 	cd amd64 && $(MAKE) clean
 	cd arm64 && $(MAKE) clean
+	cd amd64-docker && $(MAKE) clean
+	cd arm64-docker && $(MAKE) clean
 
 push:
 	cd docker-amd64 && $(MAKE) push

@@ -1,6 +1,3 @@
-default:
-	@echo "You really want to build all or maybe chdir into what you want? Or use make all"
-
 all:
 	cd darwin && $(MAKE)
 	cd linux && $(MAKE)
