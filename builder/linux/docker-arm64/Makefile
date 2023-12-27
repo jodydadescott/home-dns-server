@@ -5,7 +5,7 @@ DOCKER_IMAGE_NAME?=$(PROJECT_NAME)
 DOCKER_IMAGE_TAG?=$(BUILD_NUMBER)
 
 home-dns-server:
-	env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -v -trimpath -o home-dns-server ../../../home-dns-server.go
+	env GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -v -trimpath -o home-dns-server ../../../home-dns-server.go
 	docker build -t $(DOCKER_REGISTRY)/$(DOCKER_IMAGE_NAME):$(DOCKER_IMAGE_TAG) .
 
 push:
